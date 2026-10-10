@@ -66,6 +66,11 @@ const cases = [
   ["number of a's is 1 mod 3 over {a,b}", w => cnt(w, 'a') % 3 === 1, 3],
   ['contains both a and b over {a,b}', w => w.includes('a') && w.includes('b'), 4],
   ['|w| is divisible by 4 over {a,b}', w => w.length % 4 === 0, 4],
+  ["at most 2 consecutive 1s", w => !w.includes('111'), 4],
+  ["at least 3 consecutive a's over {a,b}", w => w.includes('aaa'), 4],
+  ["'ab' occurs at least 2 times over {a,b}", w => (w.match(/(?=ab)/g) || []).length >= 2, null],
+  ['a appears exactly 3 times over {a,b}', w => cnt(w, 'a') === 3, 5],
+  ['aa occurs at most once over {a,b}', w => (w.match(/(?=aa)/g) || []).length <= 1, null],
   ['ends with 01 and has odd length', w => w.endsWith('01') && w.length % 2 === 1, null],
 ];
 

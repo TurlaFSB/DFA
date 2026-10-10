@@ -16,6 +16,7 @@
       'Third symbol from the end is 1',
       'Starts and ends with the same symbol over {a,b}',
       'Every a is followed by b over {a,b}',
+      'At most 2 consecutive 1s',
     ],
     'Counting & parity': [
       "Exactly two a's over {a,b}",
@@ -24,6 +25,7 @@
       'Length divisible by 3 over {a,b}',
       'Length between 2 and 4 over {a,b}',
       "Number of a's is 1 mod 3 over {a,b}",
+      "'ab' occurs at least 2 times over {a,b}",
     ],
     'Numbers': [
       'Binary numbers divisible by 3',
@@ -70,17 +72,30 @@
   })();
   $('themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 
-  /* ---------------- examples dropdown ---------------- */
+  /* ---------------- question-type list ---------------- */
   (function () {
-    const sel = $('examples');
-    sel.add(new Option('Try an example…', ''));
+    const box = $('examples');
+    let first = true;
     for (const g in EXAMPLE_GROUPS) {
-      const og = document.createElement('optgroup'); og.label = g;
-      EXAMPLE_GROUPS[g].forEach(t => og.appendChild(new Option(t, t)));
-      sel.appendChild(og);
+      const d = document.createElement('details');
+      d.open = first; first = false;
+      const sm = document.createElement('summary'); sm.textContent = g; d.appendChild(sm);
+      EXAMPLE_GROUPS[g].forEach(t => {
+        const b = document.createElement('button');
+        b.className = 'ex'; b.textContent = t;
+        b.onclick = () => { $('q').value = t; $('alpha').value = ''; generate(); };
+        d.appendChild(b);
+      });
+      box.appendChild(d);
     }
-    sel.onchange = () => { if (sel.value) { $('q').value = sel.value; $('alpha').value = ''; generate(); sel.value = ''; } };
   })();
+
+  /* ---------------- tabs ---------------- */
+  document.querySelectorAll('.tab').forEach(b => (b.onclick = () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === b));
+    document.querySelectorAll('.tabpane').forEach(p => (p.hidden = p.id !== 'pane-' + b.dataset.tab));
+    if (b.dataset.tab === 'man') renderManual();
+  }));
 
   /* ---------------- generate from question ---------------- */
   function generate() {
@@ -94,13 +109,14 @@
         notes: res.notes.concat(['Shown as the minimal DFA (' + res.dfa.n + ' state' + (res.dfa.n === 1 ? '' : 's') + ').']),
       });
       saveHash();
+      if (window.innerWidth < 980) $('answer').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (e) {
       show($('msg'), e.message, e.nonRegular);
       document.body.classList.add('has-error');
       if (!(e instanceof L.DFAError)) { console.error(e); show($('msg'), 'Something went wrong while building that DFA — try rephrasing the question.'); }
     }
   }
-  $('genBtn').onclick = () => { generate(); if (!$('msg').hidden) return; $('answer').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  $('genBtn').onclick = generate;
   $('q').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); generate(); } });
 
   /* ---------------- install a DFA & render panels ---------------- */
@@ -322,7 +338,6 @@
     t.querySelectorAll('select').forEach(sel => (sel.onchange = () => (m.delta[+sel.dataset.s][+sel.dataset.c] = +sel.value)));
   }
   $('malpha').oninput = $('mn').oninput = renderManual;
-  $('manualFold').addEventListener('toggle', () => { if ($('manualFold').open) renderManual(); });
   $('mapply').onclick = () => {
     show($('merr'), '');
     try {
@@ -333,7 +348,7 @@
         en: 'Use the example strings and the animation to explore what it accepts.',
         notes: ['Not minimised — shown exactly as you entered it.'],
       });
-      $('answer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (window.innerWidth < 980) $('answer').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (e) { show($('merr'), e.message); }
   };
   $('mfrom').onclick = () => {

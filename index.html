@@ -9,61 +9,70 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="logo">δ</span><h1>DFA Studio</h1></div>
+  <div class="brand"><span class="logo">δ</span><div><h1>DFA Studio</h1><p>question → language → diagram → animation</p></div></div>
   <button id="themeBtn" class="ghost sm" title="Switch light / dark">Theme</button>
 </header>
 
-<main>
-  <!-- 1 · ASK -->
-  <section class="card ask">
-    <label for="q">Type the question</label>
-    <div class="askrow">
-      <textarea id="q" rows="2" spellcheck="false" placeholder="e.g.  Design a DFA over {0,1} that accepts strings ending with 01"></textarea>
-      <button id="genBtn" class="primary">Generate</button>
-    </div>
-    <div id="msg" class="msg" hidden></div>
-
-    <div class="askopts">
-      <select id="examples" aria-label="Try an example"></select>
-      <details class="inline"><summary>Options</summary>
-        <div class="opt"><label for="alpha">Alphabet Σ <span class="muted">(leave empty = detect automatically)</span></label>
-        <input id="alpha" placeholder="e.g. 0,1" spellcheck="false"></div>
+<div class="app">
+  <!-- LEFT: input -->
+  <aside class="side">
+    <section class="panel">
+      <label for="q">Question</label>
+      <textarea id="q" rows="4" spellcheck="false" placeholder="Type the question exactly as it is given…&#10;e.g. Design a DFA over {0,1} that accepts strings ending with 01"></textarea>
+      <button id="genBtn" class="primary block">Generate DFA</button>
+      <div id="msg" class="msg" hidden></div>
+      <details class="opts"><summary>Options</summary>
+        <label for="alpha">Alphabet Σ <span class="muted">(empty = detect)</span></label>
+        <input id="alpha" placeholder="e.g. 0,1" spellcheck="false">
       </details>
-      <details class="inline"><summary>What can I type?</summary>
-        <div class="help-grid">
-          <div><b>Plain English</b><br>ends with 01 · starts with ab · contains 101 · does not contain 11 · no two consecutive a's · exactly / at least / at most 2 a's · even number of 0s · length divisible by 3 · binary numbers divisible by 5 · third symbol from the end is 1 · starts and ends with the same symbol · every a is followed by b</div>
-          <div><b>Combine</b><br>and · or · but · not · neither … nor<br><i>starts with 0 but does not end with 1</i></div>
-          <div><b>Regular expression</b><br><i>(a+b)*abb</i> · <i>0*10*</i> · <i>a(a|b)*b</i><br>( + or | = union, * = star, ε = empty string)</div>
-          <div><b>Set notation</b><br><i>{ w ∈ {a,b}* | |w|_a is even }</i><br><i>{ aⁿbᵐ | n ≥ 1, m ≥ 0 }</i> (write a^n b^m)</div>
+    </section>
+
+    <section class="panel">
+      <h2>Question types</h2>
+      <p class="muted small">Click any to load it, or type your own wording.</p>
+      <div id="examples" class="examples"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Writing questions</h2>
+      <ul class="tips">
+        <li>Combine with <b>and · or · but · not · neither…nor</b></li>
+        <li>Set the alphabet with <b>over {a,b}</b></li>
+        <li>Regular expressions work: <code>(a+b)*abb</code> &nbsp; (<code>+</code> or <code>|</code> = union)</li>
+        <li>Set notation works: <code>{ w ∈ {a,b}* | |w|_a is even }</code> or <code>a^n b^m</code></li>
+        <li>Not regular (e.g. equal 0s and 1s)? I'll say no DFA exists and why.</li>
+        <li>Anything else → <b>Build by hand</b> tab.</li>
+      </ul>
+    </section>
+  </aside>
+
+  <!-- RIGHT: results -->
+  <main class="stage" id="answer">
+    <section class="panel hero">
+      <div class="lang-label">Language</div>
+      <div id="lang" class="lang"></div>
+      <p id="langEn" class="muted small"></p>
+      <ul id="notes" class="notes"></ul>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>State diagram</h2>
+        <div class="tools">
+          <label class="check" id="hideDeadWrap"><input type="checkbox" id="hideDead"> hide trap state</label>
+          <button class="ghost sm" id="relayout">Tidy up</button>
+          <button class="ghost sm" id="dlSvg">SVG</button>
+          <button class="ghost sm" id="dlPng">PNG</button>
         </div>
-        <p class="muted small">Not regular (e.g. equal number of 0s and 1s, aⁿbⁿ, palindromes)? I'll tell you no DFA exists and why. Anything else: use <b>Build by hand</b> at the bottom.</p>
-      </details>
-    </div>
-  </section>
-
-  <!-- 2 · ANSWER -->
-  <section class="card answer" id="answer">
-    <div class="lang-box"><div class="lang-label">Language</div><div id="lang" class="lang"></div></div>
-    <p id="langEn" class="muted small"></p>
-    <ul id="notes" class="notes"></ul>
-
-    <div class="card-head">
-      <h2>Diagram</h2>
-      <div class="tools">
-        <label class="check" id="hideDeadWrap"><input type="checkbox" id="hideDead"> hide trap state</label>
-        <button class="ghost sm" id="relayout">Tidy</button>
-        <button class="ghost sm" id="dlSvg">Save SVG</button>
-        <button class="ghost sm" id="dlPng">Save PNG</button>
       </div>
-    </div>
-    <div class="canvas" id="canvas"><svg id="svg" role="img" aria-label="DFA state diagram"></svg></div>
-    <p class="muted small hint">Double circle = accepting state · dashed = trap state · you can drag the states around.</p>
+      <div class="canvas" id="canvas"><svg id="svg" role="img" aria-label="DFA state diagram"></svg></div>
+      <p class="muted small hint">Double circle = accepting · dashed = trap state · drag states to rearrange.</p>
+    </section>
 
-    <!-- 3 · RUN -->
-    <div class="runbox">
-      <h2>Test a string</h2>
+    <section class="panel runbox">
+      <div class="panel-head"><h2>Test a string</h2><span class="muted small">type <b>ε</b> for the empty string</span></div>
       <div class="runrow">
-        <input id="str" class="mono big" placeholder="type any string, e.g. 1101001  (ε = empty)" spellcheck="false" autocomplete="off">
+        <input id="str" class="mono big" placeholder="e.g. 1101001" spellcheck="false" autocomplete="off">
         <button id="bPlay" class="primary">▶ Run</button>
       </div>
       <div class="controls">
@@ -75,41 +84,45 @@
       <div id="tape" class="tape" aria-live="polite"></div>
       <div id="verdict" class="verdict"></div>
       <details class="steps"><summary>Show each step</summary><ol id="trace" class="trace"></ol></details>
-    </div>
-  </section>
+    </section>
 
-  <!-- 4 · DETAILS (collapsed) -->
-  <details class="card fold" open>
-    <summary>Formal definition &amp; transition table</summary>
-    <div id="tuple" class="tuple mono"></div>
-    <div class="table-wrap"><table id="ttable" class="dtable"></table></div>
-  </details>
+    <section class="panel">
+      <div class="tabbar" role="tablist">
+        <button class="tab on" data-tab="def" role="tab">Definition &amp; table</button>
+        <button class="tab" data-tab="smp" role="tab">Example strings</button>
+        <button class="tab" data-tab="bat" role="tab">Check many</button>
+        <button class="tab" data-tab="man" role="tab">Build by hand</button>
+      </div>
 
-  <details class="card fold">
-    <summary>Example accepted / rejected strings <span class="muted small">(click one to run it)</span></summary>
-    <div class="samples"><b class="okc">Accepted</b><div id="sAcc" class="pills"></div></div>
-    <div class="samples"><b class="badc">Rejected</b><div id="sRej" class="pills"></div></div>
-  </details>
+      <div class="tabpane" id="pane-def">
+        <div id="tuple" class="tuple mono"></div>
+        <div class="table-wrap"><table id="ttable" class="dtable"></table></div>
+      </div>
 
-  <details class="card fold">
-    <summary>Check many strings at once</summary>
-    <textarea id="batch" rows="3" class="mono" spellcheck="false" placeholder="one per line or comma-separated — use ε for the empty string"></textarea>
-    <div id="batchOut" class="pills"></div>
-  </details>
+      <div class="tabpane" id="pane-smp" hidden>
+        <div class="samples"><b class="okc">Accepted</b> <span class="muted small">(click to run)</span><div id="sAcc" class="pills"></div></div>
+        <div class="samples"><b class="badc">Rejected</b><div id="sRej" class="pills"></div></div>
+      </div>
 
-  <details class="card fold" id="manualFold">
-    <summary>Build by hand <span class="muted small">(for questions the text box can't understand)</span></summary>
-    <div class="row wrap">
-      <div class="alpha"><label for="malpha">Σ</label><input id="malpha" value="0,1" spellcheck="false"></div>
-      <div class="alpha small"><label for="mn">States</label><input id="mn" type="number" min="1" max="12" value="3"></div>
-      <button id="mapply" class="primary">Use this DFA</button>
-      <button id="mfrom" class="ghost">Start from current DFA</button>
-    </div>
-    <div id="merr" class="msg" hidden></div>
-    <div class="table-wrap"><table id="mtable" class="dtable"></table></div>
-    <p class="muted small">Choose the start state (●), tick the accepting states, and pick where each symbol leads.</p>
-  </details>
-</main>
+      <div class="tabpane" id="pane-bat" hidden>
+        <textarea id="batch" rows="3" class="mono" spellcheck="false" placeholder="One string per line or comma-separated — use ε for the empty string"></textarea>
+        <div id="batchOut" class="pills"></div>
+      </div>
+
+      <div class="tabpane" id="pane-man" hidden>
+        <div class="row wrap">
+          <div class="alpha"><label for="malpha">Σ</label><input id="malpha" value="0,1" spellcheck="false"></div>
+          <div class="alpha small"><label for="mn">States</label><input id="mn" type="number" min="1" max="12" value="3"></div>
+          <button id="mapply" class="primary">Use this DFA</button>
+          <button id="mfrom" class="ghost">Start from current DFA</button>
+        </div>
+        <div id="merr" class="msg" hidden></div>
+        <div class="table-wrap"><table id="mtable" class="dtable"></table></div>
+        <p class="muted small">Choose the start state (●), tick the accepting states, and pick where each symbol leads.</p>
+      </div>
+    </section>
+  </main>
+</div>
 
 <footer>Runs entirely in your browser — nothing is uploaded.</footer>
 

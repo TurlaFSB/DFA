@@ -160,6 +160,19 @@
     return fromFn(alphabet, cap + 1, 0, test, (s, c) => (inS(c) ? Math.min(s + 1, cap) : s));
   }
 
+  function cmpOp(op, k, n) { return { eq: k === n, ne: k !== n, ge: k >= n, gt: k > n, le: k <= n, lt: k < n }[op]; }
+
+  function occDFA(alphabet, w, op, n) {
+    if (!w.length) throw new DFAError('Which substring should be counted?');
+    const m = w.length, cap = n + 1;
+    const kmp = patternDFA(alphabet, w, 'ends');
+    return explore(alphabet, '0,0', (key, c) => {
+      const [st, k] = key.split(',').map(Number);
+      const t = kmp.delta[st][alphabet.indexOf(c)];
+      return t + ',' + (t === m ? Math.min(k + 1, cap) : k);
+    }, key => cmpOp(op, +key.split(',')[1], n));
+  }
+
   function modDFA(alphabet, syms, m, r) {
     const inS = c => syms === null || syms.includes(c);
     return fromFn(alphabet, m, 0, s => s === r % m, (s, c) => (inS(c) ? (s + 1) % m : s));
@@ -307,6 +320,7 @@
       case 'nthEnd': return nthEndDFA(alphabet, spec.k, spec.x);
       case 'nthStart': return nthStartDFA(alphabet, spec.k, spec.x);
       case 'regex': return regexDFA(spec.src, alphabet);
+      case 'occ': return occDFA(alphabet, spec.w, spec.op, spec.n);
       case 'diffEnds': return buildSpec({ type: 'and', args: [{ type: 'count', syms: null, op: 'ge', n: 2 }, { type: 'not', arg: { type: 'sameEnds' } }] }, alphabet);
       case 'followed': return followedDFA(alphabet, spec.x, spec.y);
       case 'hasRepeat': return buildSpec({ type: 'or', args: alphabet.map(c => ({ type: 'contains', w: c + c })) }, alphabet);
@@ -387,7 +401,7 @@
   const FLIP = { eq: 'ne', ne: 'eq', ge: 'lt', gt: 'le', le: 'gt', lt: 'ge' };
   const q = w => (w === '' ? 'ε' : '“' + w + '”');
   const plural = (x, n) => x + (n === 1 ? '' : '’s');
-  const LEAF = new Set(['diffEnds', 'regex', 'followed', 'hasRepeat', 'all', 'starts', 'ends', 'contains', 'equals', 'count', 'mod', 'num', 'sameEnds', 'nthEnd', 'nthStart']);
+  const LEAF = new Set(['occ', 'diffEnds', 'regex', 'followed', 'hasRepeat', 'all', 'starts', 'ends', 'contains', 'equals', 'count', 'mod', 'num', 'sameEnds', 'nthEnd', 'nthStart']);
 
   function describe(s, alphabet, neg) {
     neg = !!neg;
@@ -414,6 +428,10 @@
         const b = BASENAME[bb] || 'base-' + bb;
         if (s.r === 0) return `w, read as a ${b} number, is ${neg ? 'not ' : ''}divisible by ${s.m}`;
         return `w, read as a ${b} number, ${neg ? 'does not leave' : 'leaves'} remainder ${s.r} when divided by ${s.m}`;
+      }
+      case 'occ': {
+        const op = neg ? FLIP[s.op] : s.op;
+        return `the substring ${q(s.w)} occurs ${OPW[op]} ${s.n} time${s.n === 1 ? '' : 's'} in w`;
       }
       case 'diffEnds': return neg ? 'w is shorter than 2 or starts and ends with the same symbol' : 'w starts and ends with different symbols';
       case 'regex': return `w ${neg ? 'does not match' : 'matches'} the regular expression ${s.src}`;
@@ -542,6 +560,24 @@
         const t = tk(m);
         return out(wrap({ type: 'and', args: [{ type: 'starts', w: t.w }, { type: 'ends', w: t.w }] }));
       }
+    }
+
+    // at least / at most k consecutive x's
+    m = c.match(new RegExp('\\b(at\\s+least|at\\s+most|more\\s+than|fewer\\s+than|less\\s+than)\\s+' + NUMRE + '\\s+(?:consecutive|successive|continuous)\\s+' + SYM, 'i'));
+    if (m) {
+      const kind = opFrom(m[1]), k = numOf(m[2]), run = n => ({ type: 'contains', w: m[3].repeat(Math.max(1, n)) });
+      let sp;
+      if (kind === 'ge') sp = run(k);
+      else if (kind === 'gt') sp = run(k + 1);
+      else if (kind === 'le') sp = { type: 'not', arg: run(k + 1) };
+      else sp = { type: 'not', arg: run(k) };
+      return out(wrap(sp));
+    }
+    // substring / symbol occurrences:  "ab occurs at least 2 times"
+    m = c.match(new RegExp(TOK + '\\s+(?:appears?\\s+|occurs?\\s+)?' + QUANT + '\\s+' + NUMRE + '(?:\\s+times?\\b|(?<=once|twice)\\b)', 'i'));
+    if (m) {
+      const t0 = tk(m);
+      if (t0.quoted || !STOP.has(t0.w.toLowerCase())) return out(wrap({ type: 'occ', w: t0.w, op: opFrom(m[3]), n: numOf(m[4]) }));
     }
 
     // consecutive symbols
