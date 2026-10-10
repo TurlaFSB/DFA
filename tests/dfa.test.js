@@ -40,6 +40,33 @@ const cases = [
   ['strings over {a,b,c} that contain c', w => w.includes('c'), 2],
   ['empty string only over {a,b}', w => w === '', 2],
   ['binary numbers that leave remainder 1 when divided by 3', w => parseInt(w || '0', 2) % 3 === 1, 3],
+  // --- regular expressions, set-builder forms, extra phrasings ---
+  ['(a+b)*abb', w => /^(?:a|b)*abb$/.test(w), 4],
+  ['regular expression (0+1)*01 over {0,1}', w => /^(?:0|1)*01$/.test(w), 3],
+  ['a*b*', w => /^a*b*$/.test(w), 3],
+  ['(ab)*', w => /^(?:ab)*$/.test(w), 3],
+  ['0*10*', w => /^0*10*$/.test(w), 3],
+  ['a(a|b)*b', w => /^a(?:a|b)*b$/.test(w), 4],
+  ['ab+ba', w => w === 'ab' || w === 'ba', null],
+  ['(a+b)*a(a+b)?', w => /^(?:a|b)*a(?:a|b)?$/.test(w), null],
+  ['L = {a^n b^m | n >= 1, m >= 0}', w => /^a+b*$/.test(w), 4],
+  ['L = {(ab)^n | n >= 0}', w => /^(?:ab)*$/.test(w), 3],
+  ['L = {a^2n | n >= 0} over {a}', w => /^(?:aa)*$/.test(w), 2],
+  ['L = { w ∈ {a,b}* | |w|_a is even }', w => cnt(w, 'a') % 2 === 0, 2],
+  ['L = { w ∈ {0,1}* | w ends with 01 }', w => w.endsWith('01'), 3],
+  ['every a is followed by b over {a,b}', w => !/a(?:a|$)/.test(w), 3],
+  ['length between 2 and 4 over {a,b}', w => w.length >= 2 && w.length <= 4, 6],
+  ['second last symbol is 1', w => w.length >= 2 && w[w.length - 2] === '1', 4],
+  ['decimal numbers divisible by 3', w => parseInt(w || '0', 10) % 3 === 0, 3],
+  ['ternary numbers that are even', w => parseInt(w || '0', 3) % 2 === 0, 2],
+  ['no two adjacent equal symbols over {a,b}', w => !/aa|bb/.test(w), 4],
+  ['starts and ends with different symbols over {a,b}', w => w.length >= 2 && w[0] !== w[w.length - 1], 5],
+  ["all a's come before b's", w => /^a*b*$/.test(w), 3],
+  ['has a 1 at the third position from the right', w => w.length >= 3 && w[w.length - 3] === '1', 8],
+  ["number of a's is 1 mod 3 over {a,b}", w => cnt(w, 'a') % 3 === 1, 3],
+  ['contains both a and b over {a,b}', w => w.includes('a') && w.includes('b'), 4],
+  ['|w| is divisible by 4 over {a,b}', w => w.length % 4 === 0, 4],
+  ['ends with 01 and has odd length', w => w.endsWith('01') && w.length % 2 === 1, null],
 ];
 
 function* all(alpha, maxLen) {
@@ -54,7 +81,7 @@ for (const [q, oracle, states] of cases) {
   try {
     const r = L.fromQuestion(q);
     let bad = null;
-    for (const w of all(r.alphabet, 9)) {
+    for (const w of all(r.alphabet, r.alphabet.length > 3 ? 4 : 9)) {
       if (L.run(r.dfa, w).accepted !== !!oracle(w)) { bad = w; break; }
     }
     const stateOk = states === null || r.dfa.n === states;
@@ -66,7 +93,7 @@ for (const [q, oracle, states] of cases) {
 }
 
 // Error handling
-for (const q of ['', 'banana pancakes', 'ends with 2 over {0,1}']) {
+for (const q of ['', 'banana pancakes', 'ends with 2 over {0,1}', 'equal number of 0s and 1s', 'a^n b^n', 'palindromes over {a,b}', '(a+b']) {
   try { L.fromQuestion(q); fail++; console.log('FAIL (should reject)', q); } catch (e) { pass++; }
 }
 // Manual table

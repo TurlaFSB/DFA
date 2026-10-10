@@ -5,25 +5,55 @@
   const $ = id => document.getElementById(id);
   const view = new DFAView($('svg'));
 
-  const EXAMPLES = [
-    'Strings over {0,1} that end with 01',
-    'Contains the substring 101 over {0,1}',
-    'Binary numbers divisible by 3',
-    'Even number of 0s and odd number of 1s',
-    "No two consecutive a's over {a,b}",
-    'Starts with a and ends with b over {a,b}',
-    'Starts and ends with the same symbol over {a,b}',
-    'Third symbol from the end is 1',
-    'Length is at least 3 and ends with ab over {a,b}',
-    "Exactly two a's over {a,b}",
-  ];
+  const EXAMPLE_GROUPS = {
+    'Ends / starts / contains': [
+      'Strings over {0,1} that end with 01',
+      'Starts with a and ends with b over {a,b}',
+      'Contains the substring 101 over {0,1}',
+      "No two consecutive a's over {a,b}",
+      'Ends with ab or ba over {a,b}',
+      'Second last symbol is 1',
+      'Third symbol from the end is 1',
+      'Starts and ends with the same symbol over {a,b}',
+      'Every a is followed by b over {a,b}',
+    ],
+    'Counting & parity': [
+      "Exactly two a's over {a,b}",
+      "At least 2 a's and at most 1 b over {a,b}",
+      'Even number of 0s and odd number of 1s',
+      'Length divisible by 3 over {a,b}',
+      'Length between 2 and 4 over {a,b}',
+      "Number of a's is 1 mod 3 over {a,b}",
+    ],
+    'Numbers': [
+      'Binary numbers divisible by 3',
+      'Binary numbers divisible by 5',
+      'Decimal numbers divisible by 3',
+      'Ternary numbers that are even',
+    ],
+    'Regular expressions': [
+      '(a+b)*abb',
+      '0*10*',
+      'a(a|b)*b',
+      '(ab)*',
+    ],
+    'Set notation': [
+      'L = { w ∈ {a,b}* | |w|_a is even }',
+      'L = { a^n b^m | n >= 1, m >= 0 }',
+    ],
+    'Not regular (no DFA exists)': [
+      'Equal number of 0s and 1s',
+      'L = { a^n b^n | n >= 0 }',
+    ],
+  };
+  const FIRST_EXAMPLE = EXAMPLE_GROUPS['Ends / starts / contains'][0];
 
   let dfa = null;
   const sim = { syms: [], pos: 0, path: [], started: false, animating: false, playing: false, timer: null, bad: -1 };
 
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const qn = s => 'q' + s;
-  const show = (el, msg) => { el.hidden = !msg; el.textContent = msg || ''; };
+  const show = (el, msg, info) => { el.hidden = !msg; el.textContent = msg || ''; el.classList.toggle('info', !!info); };
   const parseAlpha = s => Array.from(new Set(s.split(/[\s,{}]+/).filter(Boolean)));
 
   /* ---------------- theme ---------------- */
@@ -40,25 +70,22 @@
   })();
   $('themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 
-  /* ---------------- tabs ---------------- */
-  document.querySelectorAll('.tab').forEach(b => (b.onclick = () => {
-    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === b));
-    $('tab-q').hidden = b.dataset.tab !== 'q';
-    $('tab-m').hidden = b.dataset.tab !== 'm';
-    if (b.dataset.tab === 'm') renderManual();
-  }));
-
-  /* ---------------- examples ---------------- */
-  EXAMPLES.forEach(t => {
-    const b = document.createElement('button');
-    b.className = 'chip'; b.textContent = t;
-    b.onclick = () => { $('q').value = t; $('alpha').value = ''; generate(); };
-    $('chips').appendChild(b);
-  });
+  /* ---------------- examples dropdown ---------------- */
+  (function () {
+    const sel = $('examples');
+    sel.add(new Option('Try an example…', ''));
+    for (const g in EXAMPLE_GROUPS) {
+      const og = document.createElement('optgroup'); og.label = g;
+      EXAMPLE_GROUPS[g].forEach(t => og.appendChild(new Option(t, t)));
+      sel.appendChild(og);
+    }
+    sel.onchange = () => { if (sel.value) { $('q').value = sel.value; $('alpha').value = ''; generate(); sel.value = ''; } };
+  })();
 
   /* ---------------- generate from question ---------------- */
   function generate() {
-    show($('err'), '');
+    show($('msg'), '');
+    document.body.classList.remove('has-error');
     try {
       const res = L.fromQuestion($('q').value, parseAlpha($('alpha').value));
       setDFA(res.dfa, {
@@ -68,18 +95,20 @@
       });
       saveHash();
     } catch (e) {
-      show($('err'), e.message);
-      if (!(e instanceof L.DFAError)) console.error(e);
+      show($('msg'), e.message, e.nonRegular);
+      document.body.classList.add('has-error');
+      if (!(e instanceof L.DFAError)) { console.error(e); show($('msg'), 'Something went wrong while building that DFA — try rephrasing the question.'); }
     }
   }
-  $('genBtn').onclick = generate;
-  $('q').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || !e.shiftKey)) { e.preventDefault(); generate(); } });
+  $('genBtn').onclick = () => { generate(); if (!$('msg').hidden) return; $('answer').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  $('q').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); generate(); } });
 
   /* ---------------- install a DFA & render panels ---------------- */
   function setDFA(d, info) {
     dfa = d;
     $('hideDead').checked = false;
     view.hideDead = false;
+    $('hideDeadWrap').hidden = !d.isDead.some(Boolean);
     view.setDFA(d);
     renderInfo(info);
     renderBatch();
@@ -136,18 +165,14 @@
   $('batch').addEventListener('input', renderBatch);
 
   /* ---------------- diagram toolbar ---------------- */
-  let zoom = 1;
-  // natural size (≈1.25x) capped to the container, then scaled by the zoom buttons
+  // natural size (≈1.25x) capped to the container width
   function fit() {
     if (!view.vb) return;
     const avail = $('canvas').clientWidth - 2;
-    $('svg').style.width = Math.round(Math.min(avail, view.vb.w * 1.25) * zoom) + 'px';
+    $('svg').style.width = Math.round(Math.min(avail, view.vb.w * 1.25)) + 'px';
   }
   view.onDraw = fit;
   window.addEventListener('resize', fit);
-  const setZoom = z => { zoom = Math.max(0.5, Math.min(3, z)); fit(); };
-  $('zoomIn').onclick = () => setZoom(zoom + 0.25);
-  $('zoomOut').onclick = () => setZoom(zoom - 0.25);
   $('hideDead').onchange = e => { view.setHideDead(e.target.checked); };
   $('relayout').onclick = () => { if (dfa) { view.autoLayout(); view.draw(); } };
   const download = (blob, name) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
@@ -297,6 +322,7 @@
     t.querySelectorAll('select').forEach(sel => (sel.onchange = () => (m.delta[+sel.dataset.s][+sel.dataset.c] = +sel.value)));
   }
   $('malpha').oninput = $('mn').oninput = renderManual;
+  $('manualFold').addEventListener('toggle', () => { if ($('manualFold').open) renderManual(); });
   $('mapply').onclick = () => {
     show($('merr'), '');
     try {
@@ -307,6 +333,7 @@
         en: 'Use the example strings and the animation to explore what it accepts.',
         notes: ['Not minimised — shown exactly as you entered it.'],
       });
+      $('answer').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (e) { show($('merr'), e.message); }
   };
   $('mfrom').onclick = () => {
@@ -321,7 +348,7 @@
   function saveHash() {
     try {
       const p = new URLSearchParams();
-      if ($('tab-q').hidden === false && $('q').value) p.set('q', $('q').value);
+      if ($('q').value) p.set('q', $('q').value);
       if ($('alpha').value) p.set('a', $('alpha').value);
       if ($('str').value) p.set('s', $('str').value);
       history.replaceState(null, '', p.toString() ? '#' + p.toString() : location.pathname);
@@ -329,7 +356,7 @@
   }
   function loadHash() {
     const p = new URLSearchParams(location.hash.slice(1));
-    $('q').value = p.get('q') || EXAMPLES[0];
+    $('q').value = p.get('q') || FIRST_EXAMPLE;
     $('alpha').value = p.get('a') || '';
     $('str').value = p.get('s') || '';
   }

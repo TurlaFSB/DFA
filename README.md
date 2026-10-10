@@ -37,6 +37,12 @@ Add `over {a,b}` to the question (or fill the Σ box) to set the alphabet. If om
 
 Anything the text parser can't handle can be entered in the **Manual builder** tab (fill in the transition table) and still gets the diagram and animation.
 
+## More input styles
+
+* **Regular expressions** — `(a+b)*abb`, `0*10*`, `a(a|b)*b` (`+` or `|` = union, `*` star, `ε` empty string)
+* **Set notation** — `{ w ∈ {a,b}* | |w|_a is even }`, `{ a^n b^m | n ≥ 1, m ≥ 0 }`
+* **Non-regular languages** (equal numbers of 0s and 1s, aⁿbⁿ, palindromes …) are detected and explained — no DFA exists.
+
 ## How it works
 
 * `js/dfa.js` — question parser → spec tree → DFA. Each condition is a small automaton (KMP-style for substrings, counters, modular counters …); `and` / `or` use the **product construction**, `not` uses **complement**, and the result is reduced with **Moore's partition-refinement minimisation**, so the answer is the textbook minimal DFA.

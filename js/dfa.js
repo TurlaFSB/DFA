@@ -165,10 +165,10 @@
     return fromFn(alphabet, m, 0, s => s === r % m, (s, c) => (inS(c) ? (s + 1) % m : s));
   }
 
+  const BASENAME = { 2: 'binary', 3: 'ternary', 8: 'octal', 10: 'decimal' };
   function baseOf(alphabet) {
-    if (alphabet.every(c => c === '0' || c === '1')) return 2;
-    if (alphabet.every(c => /^\d$/.test(c))) return 10;
-    return null;
+    if (!alphabet.length || !alphabet.every(c => /^\d$/.test(c))) return null;
+    return Math.max(2, Math.max(...alphabet.map(Number)) + 1);
   }
 
   function numDFA(alphabet, m, r) {
@@ -203,6 +203,96 @@
     );
   }
 
+  /* ---------- regular expressions (Thompson NFA -> subset construction) ---------- */
+  function parseRegex(src) {
+    const toks = [...src.replace(/\s+/g, '')];
+    let i = 0;
+    const isStart = t => t !== undefined && /[A-Za-z0-9.ελ∅(]/.test(t);
+    const bad = m => { throw new DFAError('Regular expression problem: ' + m); };
+    function union() {
+      const alts = [concat()];
+      while (toks[i] === '|' || toks[i] === '+') { i++; alts.push(concat()); }
+      return alts.length === 1 ? alts[0] : { k: 'alt', a: alts };
+    }
+    function concat() {
+      const parts = [];
+      while (isStart(toks[i])) parts.push(postfix());
+      if (!parts.length) return { k: 'eps' };
+      return parts.length === 1 ? parts[0] : { k: 'cat', a: parts };
+    }
+    function postfix() {
+      let n = atom();
+      for (;;) {
+        const t = toks[i];
+        if (t === '*') { i++; n = { k: 'star', a: n }; }
+        else if (t === '?') { i++; n = { k: 'opt', a: n }; }
+        else if (t === '+' && !isStart(toks[i + 1])) { i++; n = { k: 'plus', a: n }; }
+        else break;
+      }
+      return n;
+    }
+    function atom() {
+      const t = toks[i++];
+      if (t === '(') { const n = union(); if (toks[i++] !== ')') bad('missing “)”'); return n; }
+      if (t === 'ε' || t === 'λ') return { k: 'eps' };
+      if (t === '∅') return { k: 'empty' };
+      if (t === '.') return { k: 'any' };
+      return { k: 'sym', c: t };
+    }
+    if (!toks.length) bad('it is empty');
+    const ast = union();
+    if (i < toks.length) bad('unexpected “' + toks[i] + '”');
+    return ast;
+  }
+
+  function regexDFA(src, alphabet) {
+    const ast = parseRegex(src);
+    const st = [];
+    const nw = () => (st.push({ e: [], t: {} }), st.length - 1);
+    const add = (a, c, b) => { (st[a].t[c] = st[a].t[c] || []).push(b); };
+    const build = n => {
+      let s0, e0;
+      switch (n.k) {
+        case 'sym': s0 = nw(); e0 = nw(); add(s0, n.c, e0); return [s0, e0];
+        case 'any': s0 = nw(); e0 = nw(); alphabet.forEach(c => add(s0, c, e0)); return [s0, e0];
+        case 'eps': s0 = nw(); e0 = nw(); st[s0].e.push(e0); return [s0, e0];
+        case 'empty': return [nw(), nw()];
+        case 'cat': {
+          const f = n.a.map(build);
+          for (let j = 0; j + 1 < f.length; j++) st[f[j][1]].e.push(f[j + 1][0]);
+          return [f[0][0], f[f.length - 1][1]];
+        }
+        case 'alt': { s0 = nw(); e0 = nw(); n.a.map(build).forEach(f => { st[s0].e.push(f[0]); st[f[1]].e.push(e0); }); return [s0, e0]; }
+        case 'star': { s0 = nw(); e0 = nw(); const f = build(n.a); st[s0].e.push(f[0], e0); st[f[1]].e.push(f[0], e0); return [s0, e0]; }
+        case 'plus': { s0 = nw(); e0 = nw(); const f = build(n.a); st[s0].e.push(f[0]); st[f[1]].e.push(f[0], e0); return [s0, e0]; }
+        case 'opt': { s0 = nw(); e0 = nw(); const f = build(n.a); st[s0].e.push(f[0], e0); st[f[1]].e.push(e0); return [s0, e0]; }
+      }
+    };
+    const [start, fin] = build(ast);
+    const closure = set => {
+      const seen = new Set(set), stack = [...set];
+      while (stack.length) { const x = stack.pop(); for (const y of st[x].e) if (!seen.has(y)) { seen.add(y); stack.push(y); } }
+      return [...seen].sort((a, b) => a - b);
+    };
+    return explore(
+      alphabet, closure([start]).join(','),
+      (key, c) => {
+        const out = new Set();
+        for (const x of key ? key.split(',') : []) (st[+x].t[c] || []).forEach(y => out.add(y));
+        return closure([...out]).join(',');
+      },
+      key => key !== '' && key.split(',').includes(String(fin))
+    );
+  }
+
+  function followedDFA(alphabet, x, y) {
+    return explore(alphabet, 'ok', (key, c) => {
+      if (key === 'bad') return 'bad';
+      if (key === 'pend' && c !== y) return 'bad';
+      return c === x ? 'pend' : 'ok';
+    }, key => key === 'ok');
+  }
+
   function buildSpec(spec, alphabet) {
     switch (spec.type) {
       case 'all': return fromFn(alphabet, 1, 0, () => true, () => 0);
@@ -216,6 +306,10 @@
       case 'sameEnds': return sameEndsDFA(alphabet);
       case 'nthEnd': return nthEndDFA(alphabet, spec.k, spec.x);
       case 'nthStart': return nthStartDFA(alphabet, spec.k, spec.x);
+      case 'regex': return regexDFA(spec.src, alphabet);
+      case 'diffEnds': return buildSpec({ type: 'and', args: [{ type: 'count', syms: null, op: 'ge', n: 2 }, { type: 'not', arg: { type: 'sameEnds' } }] }, alphabet);
+      case 'followed': return followedDFA(alphabet, spec.x, spec.y);
+      case 'hasRepeat': return buildSpec({ type: 'or', args: alphabet.map(c => ({ type: 'contains', w: c + c })) }, alphabet);
       case 'not': return complement(buildSpec(spec.arg, alphabet));
       case 'and':
       case 'or':
@@ -293,7 +387,7 @@
   const FLIP = { eq: 'ne', ne: 'eq', ge: 'lt', gt: 'le', le: 'gt', lt: 'ge' };
   const q = w => (w === '' ? 'ε' : '“' + w + '”');
   const plural = (x, n) => x + (n === 1 ? '' : '’s');
-  const LEAF = new Set(['all', 'starts', 'ends', 'contains', 'equals', 'count', 'mod', 'num', 'sameEnds', 'nthEnd', 'nthStart']);
+  const LEAF = new Set(['diffEnds', 'regex', 'followed', 'hasRepeat', 'all', 'starts', 'ends', 'contains', 'equals', 'count', 'mod', 'num', 'sameEnds', 'nthEnd', 'nthStart']);
 
   function describe(s, alphabet, neg) {
     neg = !!neg;
@@ -316,11 +410,16 @@
         return `${what} ${neg ? '≢' : '≡'} ${s.r} (mod ${s.m})`;
       }
       case 'num': {
-        const b = baseOf(alphabet || ['0', '1']) === 10 ? 'decimal' : 'binary';
+        const bb = baseOf(alphabet || ['0', '1']) || 2;
+        const b = BASENAME[bb] || 'base-' + bb;
         if (s.r === 0) return `w, read as a ${b} number, is ${neg ? 'not ' : ''}divisible by ${s.m}`;
         return `w, read as a ${b} number, ${neg ? 'does not leave' : 'leaves'} remainder ${s.r} when divided by ${s.m}`;
       }
-      case 'sameEnds': return neg ? 'w is empty, or its first and last symbols differ' : 'w starts and ends with the same symbol';
+      case 'diffEnds': return neg ? 'w is shorter than 2 or starts and ends with the same symbol' : 'w starts and ends with different symbols';
+      case 'regex': return `w ${neg ? 'does not match' : 'matches'} the regular expression ${s.src}`;
+      case 'followed': return neg ? `some ${s.x} in w is not immediately followed by ${s.y}` : `every ${s.x} in w is immediately followed by ${s.y}`;
+      case 'hasRepeat': return neg ? 'no two adjacent symbols of w are equal' : 'w has two adjacent equal symbols';
+      case 'sameEnds': return neg ? 'w does not start and end with the same symbol' : 'w starts and ends with the same symbol';
       case 'nthEnd': return `the ${ORD_NAME[s.k] || s.k + 'th'} symbol from the end of w ${neg ? 'is not' : 'is'} ${s.x}`;
       case 'nthStart': return `the ${ORD_NAME[s.k] || s.k + 'th'} symbol of w ${neg ? 'is not' : 'is'} ${s.x}`;
       case 'not':
@@ -340,6 +439,8 @@
     const add = str => { for (const ch of str || '') set.add(ch); };
     if (s.w !== undefined) add(s.w);
     if (s.x !== undefined) add(s.x);
+    if (s.y !== undefined) add(s.y);
+    if (s.src) for (const ch of s.src) if (/[A-Za-z0-9]/.test(ch)) set.add(ch);
     if (s.syms) s.syms.forEach(add);
     if (s.arg) symbolsUsed(s.arg, set);
     if (s.args) s.args.forEach(a => symbolsUsed(a, set));
@@ -401,7 +502,7 @@
 
     const wrap = s => (neg ? { type: 'not', arg: s } : s);
     const tk = m => (m[1] !== undefined ? { w: m[1], quoted: true } : { w: m[2], quoted: false });
-    const fail = () => { throw new DFAError('I couldn’t understand “' + orig + '”. See “What can I type?” below, or use the Manual builder.'); };
+    const fail = () => { throw new DFAError('I couldn’t understand “' + orig + '”. Open “What can I type?” above for supported wording, or use “Build by hand” at the bottom.'); };
     const mk = (type, t) => {
       if (!t.quoted && t.w.length > 1 && STOP.has(t.w.toLowerCase())) fail();
       if (!t.quoted && t.w.length === 1 && /^[A-Za-z0-9]$/.test(t.w) === false) fail();
@@ -409,10 +510,29 @@
       return { spec: wrap({ type, w: t.w }), type };
     };
     const out = spec => ({ spec, type: null });
+    const symCtx = () => {
+      const mm = c.match(new RegExp('number\\s+of\\s+' + SYM, 'i'));
+      return mm ? [mm[1]] : null;
+    };
     let m;
 
     // empty string
     if (/\bempty\b|\bepsilon\b|\blambda\b|ε/i.test(c)) return out(wrap({ type: 'equals', w: '' }));
+
+    // first and last symbols different
+    if ((/(?:starts?|begins?)\s*&\s*ends?/i.test(c) || /first\s*&\s*last/i.test(c)) && /\bdifferent\b|\bdistinct\b/i.test(c)) {
+      return out(wrap({ type: 'diffEnds' }));
+    }
+    // adjacent equal symbols / alternating
+    if (/\b(?:consecutive|adjacent|successive)\b[^.]*\b(?:same|equal|identical|alike|repeated)\b|\b(?:same|equal|identical|repeated)\b[^.]*\b(?:consecutive|adjacent|successive)\b/i.test(c)) {
+      return out(wrap({ type: 'hasRepeat' }));
+    }
+    if (/\balternat(?:e|es|ing)\b/i.test(c)) return out(neg ? { type: 'hasRepeat' } : { type: 'not', arg: { type: 'hasRepeat' } });
+    // every x is followed by y  /  all x's before y's
+    m = c.match(/\bevery\s+["']?([A-Za-z0-9])(?:'s|’s|s)?["']?\s+(?:is\s+|are\s+|must\s+be\s+)?(?:immediately\s+|directly\s+)?followed\s+by\s+(?:an?\s+)?["']?([A-Za-z0-9])["']?(?![A-Za-z0-9])/i);
+    if (m) return out(wrap({ type: 'followed', x: m[1], y: m[2] }));
+    m = c.match(/\ball\s+["']?([A-Za-z0-9])(?:'s|’s|s)?["']?\s+(?:come\s+|appear\s+|occur\s+|are\s+)?(?:before|precede|precedes)\s+(?:all\s+)?(?:the\s+)?["']?([A-Za-z0-9])(?:'s|’s|s)?["']?(?![A-Za-z0-9])/i);
+    if (m) return out(wrap({ type: 'regex', src: m[1] + '*' + m[2] + '*' }));
 
     // starts-and-ends (protected form "starts&ends")
     if (/(?:starts?|begins?)\s*&\s*ends?/i.test(c) || /first\s*&\s*last/i.test(c)) {
@@ -439,6 +559,15 @@
       const k = ordNum(m[1]);
       if (k) return out(wrap({ type: /end|right|last|back/i.test(m[2]) ? 'nthEnd' : 'nthStart', k, x: m[3] }));
     }
+    m = c.match(/\b(second|third|fourth|fifth|sixth|2nd|3rd|4th|5th|6th)\s*(?:-|\s)\s*(?:to\s*-?\s*)?last\s+(?:symbol|character|letter|bit|char|digit)\s+(?:is|=|equals?)\s+["']?([A-Za-z0-9])["']?/i);
+    if (m && ordNum(m[1])) return out(wrap({ type: 'nthEnd', k: ordNum(m[1]), x: m[2] }));
+    m = c.match(/(?:^|\s)["']?([A-Za-z0-9])["']?\s+(?:at|in|on)\s+(?:the\s+)?(\w+)\s+(?:position|place|spot|symbol)(?:\s+from\s+the\s+(\w+))?/i);
+    if (m && ordNum(m[2])) {
+      const fromEnd = m[3] && /end|right|last|back/i.test(m[3]);
+      return out(wrap({ type: fromEnd ? 'nthEnd' : 'nthStart', k: ordNum(m[2]), x: m[1] }));
+    }
+    m = c.match(/(?:^|\s)["']?([A-Za-z0-9])["']?\s+(?:at|in|on)\s+the\s+(end|beginning|start)\b/i);
+    if (m) return out(wrap({ type: /end/i.test(m[2]) ? 'ends' : 'starts', w: m[1] }));
     m = c.match(/\blast\s+(?:symbol|character|letter|bit|char|digit)\s+(?:is|=|equals?)\s+["']?([A-Za-z0-9])["']?/i);
     if (m) return out(wrap({ type: 'ends', w: m[1] }));
     m = c.match(/\bfirst\s+(?:symbol|character|letter|bit|char|digit)\s+(?:is|=|equals?)\s+["']?([A-Za-z0-9])["']?/i);
@@ -447,14 +576,12 @@
     if (m && ordNum(m[1])) return out(wrap({ type: 'nthStart', k: ordNum(m[1]), x: m[2] }));
 
     // modular conditions
-    const symCtx = () => {
-      const mm = c.match(new RegExp('number\\s+of\\s+' + SYM, 'i'));
-      return mm ? [mm[1]] : null;
-    };
     m = c.match(/length\s*(?:mod|%)\s*(\d+)\s*(?:=|==|is|equals?|≡)\s*(\d+)/i);
     if (m) return out(wrap({ type: 'mod', syms: null, m: +m[1], r: +m[2] }));
     m = c.match(new RegExp('number\\s+of\\s+' + SYM + '\\s*(?:mod|%)\\s*(\\d+)\\s*(?:=|==|is|equals?|≡)\\s*(\\d+)', 'i'));
     if (m) return out(wrap({ type: 'mod', syms: [m[1]], m: +m[2], r: +m[3] }));
+    m = c.match(/(\d+)\s*(?:mod|modulo)\s*(\d+)/i);
+    if (m && +m[2] >= 1 && (symCtx() || /\blength\b/i.test(c))) return out(wrap({ type: 'mod', syms: symCtx(), m: +m[2], r: +m[1] % +m[2] }));
     m = c.match(/(?:divisible|multiples?)\s+(?:by|of)\s+(\d+)/i);
     if (m) {
       const mod = +m[1];
@@ -475,6 +602,16 @@
       if (/\b(?:numbers?|values?|integers?)\b/i.test(c)) return out(wrap({ type: 'num', m: 2, r }));
       return out(wrap({ type: 'mod', syms: null, m: 2, r }));
     }
+
+    // between lo and hi
+    m = c.match(/between\s+(\d+)\s*&\s*(\d+)/i);
+    if (m && (symCtx() || /\b(?:length|symbols|characters|letters|bits|digits)\b/i.test(c))) {
+      const syms = symCtx();
+      return out(wrap({ type: 'and', args: [{ type: 'count', syms, op: 'ge', n: +m[1] }, { type: 'count', syms, op: 'le', n: +m[2] }] }));
+    }
+    // explicit regular expression inside a clause
+    m = c.match(/\bmatch(?:es)?\s+(?:the\s+)?(?:regex|regular\s+expression|pattern)?\s*[:=]?\s*(\S.*?)\s*$/i);
+    if (m) { parseRegex(m[1]); return out(wrap({ type: 'regex', src: m[1].trim() })); }
 
     // counts
     m = c.match(new RegExp('\\b' + QUANT + '\\s+' + NUMRE + '\\s+(?:symbols?|characters?|letters?|bits?|digits?|chars?)\\b', 'i'));
@@ -511,25 +648,29 @@
     return fail();
   }
 
+  function extractAlphabet(t) {
+    const am = t.match(/(?:\bover\b|\balphabet\b|[Σ∑]|\bsigma\b)\s*(?:of|is)?\s*(?:=|:)?\s*\{?\s*([A-Za-z0-9](?:\s*,\s*[A-Za-z0-9])*)(?![A-Za-z0-9])\s*\}?/i);
+    if (!am) return { text: t, explicit: null };
+    return { text: t.replace(am[0], ' '), explicit: Array.from(new Set(am[1].split(/\s*,\s*/))) };
+  }
+
   function parseQuestion(text) {
     if (!text || !text.trim()) throw new DFAError('Type a question first, e.g. “strings over {0,1} that end with 01”.');
-    let t = ' ' + text.trim() + ' ';
-    let explicit = null;
-
-    const am = t.match(/(?:\bover\b|\balphabet\b|[Σ∑]|\bsigma\b)\s*(?:of|is)?\s*(?:=|:)?\s*\{?\s*([A-Za-z0-9](?:\s*,\s*[A-Za-z0-9])*)(?![A-Za-z0-9])\s*\}?/i);
-    if (am) {
-      explicit = Array.from(new Set(am[1].split(/\s*,\s*/)));
-      t = t.replace(am[0], ' ');
-    }
-    const binary = /\bbinary\b/i.test(t);
+    const ex = extractAlphabet(' ' + text.trim() + ' ');
+    let t = ex.text;
+    const explicit = ex.explicit;
+    const base = /\bbinary\b/i.test(t) ? 2 : /\bternary\b/i.test(t) ? 3 : /\boctal\b/i.test(t) ? 8 : /\bdecimal\b/i.test(t) ? 10 : null;
 
     t = t.replace(/\b(?:please|design|construct|draw|build|make|create|give\s+me|write|find)\b/gi, ' ')
       .replace(/\b(?:an?\s+)?(?:dfa|nfa|deterministic\s+finite\s+(?:state\s+)?(?:automaton|automata|machine)|finite\s+(?:state\s+)?(?:automaton|automata|machine)|automaton|automata)\b/gi, ' ')
       .replace(/\b(?:such\s+that|in\s+which|so\s+that|that|which|where)\b/gi, ' ')
       .replace(/\b(?:accepts?|accepting|accepted|recogni[sz]es?|recogni[sz]ing|generates?|language\s+of|language|set\s+of)\b/gi, ' ')
-      .replace(/\b(?:all|every|any)\b/gi, ' ')
+      .replace(/\b(?:all|every|any)\s+(?=(?:strings?|words?|inputs?|sequences?)\b)/gi, ' ')
       .replace(/\b(?:strings?|words?|inputs?|sequences?)\b/gi, ' ')
-      .replace(/\b(?:over|using|binary)\b/gi, ' ')
+      .replace(/\b(?:over|using|binary|ternary|octal|decimal|both)\b/gi, ' ')
+      .replace(/(^|\s)L\s*=\s*/g, ' ')
+      .replace(/(^|\s)w(?=\s)/g, ' ')
+      .replace(/\bbetween\s+(\d+)\s+(?:and|to)\s+(\d+)/gi, 'between $1&$2')
       .replace(/\bneither\b/gi, ' not ')
       .replace(/\bnor\b/gi, ' and not ')
       .replace(/\beither\b/gi, ' ')
@@ -537,7 +678,7 @@
       .replace(/\bfirst\s+and\s+last\b/gi, 'first&last')
       .replace(/\s+/g, ' ').replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, '');
 
-    if (!t) return { spec: { type: 'all' }, explicit, binary };
+    if (!t) return { spec: { type: 'all' }, explicit, base };
 
     const parts = t.split(/\s+(and|or|but)\s+|\s*[,;]\s*/i);
     const clauses = [], ops = [];
@@ -546,7 +687,7 @@
       clauses.push(parts[i]);
       ops.push(i + 1 < parts.length ? ((parts[i + 1] || 'and').toLowerCase() === 'or' ? 'or' : 'and') : null);
     }
-    if (!clauses.length) return { spec: { type: 'all' }, explicit, binary };
+    if (!clauses.length) return { spec: { type: 'all' }, explicit, base };
 
     const specs = [];
     let prevType = null;
@@ -564,12 +705,14 @@
     }
     const g = groups.map(a => (a.length === 1 ? a[0] : { type: 'and', args: a }));
     const spec = g.length === 1 ? g[0] : { type: 'or', args: g };
-    return { spec, explicit, binary };
+    return { spec, explicit, base };
   }
 
-  function inferAlphabet(used, binary, needNum) {
+  function inferAlphabet(used, base, needNum) {
     const u = Array.from(used);
-    if (!u.length) return binary || needNum ? ['0', '1'] : ['a', 'b'];
+    const range = n => Array.from({ length: n }, (_, i) => String(i));
+    if (base && u.every(c => /^\d$/.test(c) && +c < base)) return range(base);
+    if (!u.length) return needNum ? ['0', '1'] : ['a', 'b'];
     if (u.every(c => c === '0' || c === '1')) return ['0', '1'];
     if (u.every(c => /^\d$/.test(c))) {
       const mx = Math.max(...u.map(Number));
@@ -580,16 +723,141 @@
     return s.sort();
   }
 
+  /* ------------------------------------------------------------------ *
+   *  Special input forms: non-regular languages, a^n b^m, regular expressions
+   * ------------------------------------------------------------------ */
+
+  function nonRegular(reason) {
+    const e = new DFAError('No DFA exists for this language — it is not regular. ' + reason +
+      ' A DFA has only finitely many states, so it cannot remember an unbounded amount. ' +
+      'This is the classic case for the Pumping Lemma proof.');
+    e.nonRegular = true;
+    return e;
+  }
+
+  function nonRegularReason(t) {
+    if (/\b(?:equal|same)\s+(?:number|count|amount|no\.?)\s+of\b/i.test(t) && !/\bmod(?:ulo)?\b/i.test(t)) return 'Comparing two unbounded counts (e.g. equal numbers of 0s and 1s) needs unbounded memory.';
+    if (/number\s+of\s+["']?\w["']?(?:'s|’s|s)?\s*(?:is|are|=|==|equals?)\s*(?:the\s+)?number\s+of/i.test(t)) return 'Comparing two unbounded counts needs unbounded memory.';
+    if (/\bpalindrom/i.test(t)) return 'A palindrome check must remember the whole first half of the string.';
+    if (/\b(?:prime|perfect\s+square|power\s+of\s+(?:2|two)|factorial|fibonacci)\b/i.test(t)) return 'Lengths like that are not eventually periodic.';
+    return null;
+  }
+
+  function regexParsed(str) {
+    const ex = extractAlphabet(' ' + str + ' ');
+    const src = ex.text.trim().replace(/[.]+$/, '').trim();
+    parseRegex(src); // throws a friendly error on bad syntax
+    return { spec: { type: 'regex', src }, explicit: ex.explicit, base: null };
+  }
+
+  // "{ a^n b^m | n ≥ 1, m ≥ 0 }"  ->  regular expression (or a non-regular error)
+  function powersToRegex(t) {
+    if (!/\^/.test(t)) return null;
+    const ex = extractAlphabet(' ' + t + ' ');
+    let body = ex.text.trim().replace(/^\s*(?:L\s*=\s*)?\{?/i, '').replace(/\}\s*\.?\s*$/, '').trim();
+    let left = body, cond = '';
+    const bar = body.search(/[|:]/);
+    if (bar >= 0) { left = body.slice(0, bar); cond = body.slice(bar + 1); }
+    left = left.replace(/^\s*w\s*=\s*/, '').trim();
+    const tokRe = /\s*(\([^()]*\)|[A-Za-z0-9])(?:\^\s*(?:\{([^}]*)\}|([A-Za-z0-9+*]+)))?/y;
+    const parts = [];
+    let pos = 0;
+    while (pos < left.length) {
+      tokRe.lastIndex = pos;
+      const mm = tokRe.exec(left);
+      if (!mm) return null;
+      parts.push({ base: mm[1].replace(/^\(|\)$/g, ''), exp: (mm[2] !== undefined ? mm[2] : mm[3] || '').replace(/\s+/g, '') });
+      pos = tokRe.lastIndex;
+      if (/^\s*$/.test(left.slice(pos))) break;
+    }
+    if (!parts.length || !parts.some(p => p.exp)) return null;
+
+    const mins = {}, fixed = {};
+    const cre = /([a-z](?:\s*,\s*[a-z])*)\s*(≥|>=|>|≤|<=|<|=|==)\s*(\d+)/g;
+    let cm;
+    while ((cm = cre.exec(cond))) {
+      cm[1].split(/\s*,\s*/).forEach(v => {
+        const k = +cm[3];
+        if (cm[2] === '≥' || cm[2] === '>=') mins[v] = k;
+        else if (cm[2] === '>') mins[v] = k + 1;
+        else if (cm[2] === '=' || cm[2] === '==') fixed[v] = k;
+        else throw new DFAError('An upper bound on the exponent makes the language finite — write the strings out or use a regular expression.');
+      });
+    }
+    const uses = {};
+    const info = parts.map(p => {
+      let m;
+      if (!p.exp) return { p, kind: 'once' };
+      if (/^\d+$/.test(p.exp)) return { p, kind: 'num', k: +p.exp };
+      if ((m = p.exp.match(/^([a-z])$/))) { uses[m[1]] = (uses[m[1]] || 0) + 1; return { p, kind: 'var', v: m[1], c: 1 }; }
+      if ((m = p.exp.match(/^(\d+)\*?([a-z])$/))) { uses[m[2]] = (uses[m[2]] || 0) + 1; return { p, kind: 'var', v: m[2], c: +m[1] }; }
+      throw new DFAError('I can read exponents like n, 2n or a number — not “' + p.exp + '”. Try a regular expression instead.');
+    });
+    for (const v in uses) if (uses[v] > 1 && fixed[v] === undefined) throw nonRegular('The same exponent “' + v + '” appears twice (like aⁿbⁿ), so the machine would have to count ' + v + '.');
+    const unit = (b, c) => { const u = b.length === 1 ? b : '(' + b + ')'; return c === 1 ? u : '(' + u.repeat(c) + ')'; };
+    const rep = (u, k) => (k === 0 ? '' : u.repeat(k));
+    let src = '';
+    for (const it of info) {
+      const b = it.p.base;
+      if (it.kind === 'once') src += unit(b, 1);
+      else if (it.kind === 'num') src += rep(unit(b, 1), it.k);
+      else {
+        const u = unit(b, it.c);
+        if (fixed[it.v] !== undefined) src += rep(u, fixed[it.v]);
+        else src += rep(u, mins[it.v] || 0) + u + '*';
+      }
+    }
+    return { src: src || 'ε', explicit: ex.explicit };
+  }
+
+  function tryRegexParsed(t) {
+    const ex = extractAlphabet(' ' + t + ' ');
+    const s = ex.text
+      .replace(/\b(?:please|design|construct|draw|build|make|create|give\s+me|write|find)\b/gi, ' ')
+      .replace(/\b(?:an?\s+)?(?:dfa|deterministic\s+finite\s+(?:state\s+)?(?:automaton|automata|machine)|automaton)\b/gi, ' ')
+      .replace(/\b(?:for|to\s+accept|that\s+accepts?|accepting|the\s+language|the\s+set|language|accepts?)\b/gi, ' ')
+      .replace(/(^|\s)L\s*(?:\([^)]*\))?\s*=\s*/g, ' ')
+      .trim().replace(/[.]+$/, '').trim();
+    if (!/^[A-Za-z0-9()+*|?.ελ∅\s]+$/.test(s) || !/[()+*|?.]/.test(s)) return null;
+    try { parseRegex(s); } catch (e) { return null; }
+    return { spec: { type: 'regex', src: s }, explicit: ex.explicit, base: null };
+  }
+
   // Main entry: question text -> { dfa, spec, alphabet, cond, lang, notes }
   function fromQuestion(text, forcedAlphabet) {
-    const parsed = parseQuestion(text);
+    if (!text || !text.trim()) throw new DFAError('Type a question first, e.g. “strings over {0,1} that end with 01”.');
+    let t = text.trim();
+    // { w ∈ {a,b}* | condition }
+    const sb = t.match(/\{\s*w\s*(?:∈|in|\\in)\s*\{([^}]*)\}\s*\*?\s*(?:\||:|such\s+that)\s*([\s\S]*?)\s*\}\s*\.?\s*$/i);
+    if (sb) t = sb[2] + ' over {' + sb[1] + '}';
+    // |w|, |w|_a, n_a(w), #a(w)  ->  words
+    t = t.replace(/\|\s*w\s*\|\s*_\s*\{?([A-Za-z0-9])\}?/g, 'number of $1')
+      .replace(/\bn_?\{?([A-Za-z0-9])\}?\s*\(\s*w\s*\)/g, 'number of $1')
+      .replace(/#\s*([A-Za-z0-9])\s*\(\s*w\s*\)/g, 'number of $1')
+      .replace(/\|\s*w\s*\|/g, 'length');
+
+    const reason = nonRegularReason(t);
+    if (reason) throw nonRegular(reason);
+
+    let parsed = null, nlErr = null;
+    const pw = powersToRegex(t);
+    if (pw) parsed = { spec: { type: 'regex', src: pw.src }, explicit: pw.explicit, base: null };
+    if (!parsed) {
+      const rm = t.match(/\b(?:regular\s+expression|regex)\b\s*(?:for|is|of|[:=])?\s*([\s\S]+)$/i);
+      if (rm) parsed = regexParsed(rm[1]);
+    }
+    if (!parsed) {
+      try { parsed = parseQuestion(t); } catch (e) { if (!(e instanceof DFAError)) throw e; nlErr = e; }
+    }
+    if (!parsed) { parsed = tryRegexParsed(t); if (!parsed) throw nlErr; }
+
     const used = symbolsUsed(parsed.spec);
     const needNum = hasType(parsed.spec, 'num');
     const notes = [];
     let alphabet = forcedAlphabet && forcedAlphabet.length ? forcedAlphabet : parsed.explicit;
     if (!alphabet) {
-      alphabet = inferAlphabet(used, parsed.binary, needNum);
-      notes.push('Σ was not given, so I assumed Σ = {' + alphabet.join(', ') + '}. Change the Σ box to override.');
+      alphabet = inferAlphabet(used, parsed.base, needNum);
+      notes.push('Σ was not given, so I assumed Σ = {' + alphabet.join(', ') + '}. You can change it under “Options”.');
     }
     for (const c of used) {
       if (!alphabet.includes(c)) {
