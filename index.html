@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DFA Studio</title>
+<meta name="description" content="Type a DFA question, get the minimal DFA, its language and diagram, then animate any input string step by step.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">δ</span><div><h1>DFA Studio</h1><p>Question → language → diagram → animation</p></div></div>
+  <button id="themeBtn" class="ghost" title="Toggle light / dark">◐ Theme</button>
+</header>
+
+<main>
+  <section class="card ask">
+    <div class="tabs" role="tablist">
+      <button class="tab on" data-tab="q" role="tab">From a question</button>
+      <button class="tab" data-tab="m" role="tab">Manual builder</button>
+    </div>
+
+    <div id="tab-q">
+      <label for="q">Question</label>
+      <textarea id="q" rows="2" spellcheck="false" placeholder="e.g. Design a DFA over {0,1} that accepts strings ending with 01"></textarea>
+      <div class="row">
+        <div class="alpha"><label for="alpha">Σ (optional)</label><input id="alpha" placeholder="auto — e.g. 0,1" spellcheck="false"></div>
+        <button id="genBtn" class="primary">Generate DFA <kbd>Ctrl+Enter</kbd></button>
+      </div>
+      <div id="err" class="err" hidden></div>
+      <div class="chips" id="chips"></div>
+      <details class="help">
+        <summary>What can I type?</summary>
+        <div class="help-grid">
+          <div><b>Substrings</b><br>starts with 01 · ends with ab · contains 101 · no two consecutive a's · does not contain 11 · only “abc”</div>
+          <div><b>Counting</b><br>exactly / at least / at most 2 a's · length at least 3 · length exactly 4 · even number of 0s · odd length</div>
+          <div><b>Arithmetic</b><br>length divisible by 3 · number of a's divisible by 3 · binary numbers divisible by 5 · binary numbers that are even</div>
+          <div><b>Positions</b><br>third symbol from the end is 1 · second symbol is 0 · starts and ends with the same symbol · starts and ends with a</div>
+          <div><b>Combine</b><br>use <i>and</i>, <i>or</i>, <i>but</i>, <i>not</i>, <i>neither … nor</i> — e.g. “starts with 0 but does not end with 1”</div>
+          <div><b>Alphabet</b><br>add “over {a,b}” to the question, or fill the Σ box. Otherwise it is guessed from the symbols used.</div>
+        </div>
+        <p class="muted small">Anything unusual? Use the <b>Manual builder</b> tab — fill the transition table yourself and still get the diagram and animation.</p>
+      </details>
+    </div>
+
+    <div id="tab-m" hidden>
+      <div class="row wrap">
+        <div class="alpha"><label for="malpha">Σ</label><input id="malpha" value="0,1" spellcheck="false"></div>
+        <div class="alpha small"><label for="mn">States</label><input id="mn" type="number" min="1" max="12" value="3"></div>
+        <button id="mapply" class="primary">Use this DFA</button>
+        <button id="mfrom" class="ghost">Copy current DFA here</button>
+      </div>
+      <div id="merr" class="err" hidden></div>
+      <div class="table-wrap"><table id="mtable" class="dtable"></table></div>
+      <p class="muted small">Pick the start state (●), tick the final states, and choose the target of every transition.</p>
+    </div>
+  </section>
+
+  <div class="grid">
+    <div class="col-main">
+      <section class="card">
+        <div class="card-head">
+          <h2>Diagram</h2>
+          <div class="tools">
+            <label class="check"><input type="checkbox" id="hideDead"> hide trap state</label>
+            <button class="ghost sm" id="zoomOut" title="Zoom out">−</button>
+            <button class="ghost sm" id="zoomIn" title="Zoom in">+</button>
+            <button class="ghost sm" id="relayout" title="Reset layout">Re-layout</button>
+            <button class="ghost sm" id="dlSvg">SVG</button>
+            <button class="ghost sm" id="dlPng">PNG</button>
+          </div>
+        </div>
+        <div class="canvas" id="canvas"><svg id="svg" role="img" aria-label="DFA state diagram"></svg></div>
+        <p class="muted small">Tip: drag any state to rearrange the diagram. Dashed = trap (dead) state. Double circle = final state.</p>
+      </section>
+
+      <section class="card sim">
+        <div class="card-head"><h2>Run a string</h2><span class="muted small">any string over Σ — type <b>ε</b> for the empty string</span></div>
+        <div class="row">
+          <input id="str" class="mono big" placeholder="e.g. 1101001" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="controls">
+          <button id="bBack" class="ghost" title="Step back">⏮ Back</button>
+          <button id="bPlay" class="primary">▶ Run</button>
+          <button id="bStep" class="ghost" title="Step forward">Step ⏭</button>
+          <button id="bReset" class="ghost">↺ Reset</button>
+          <label class="speed">Speed <input id="speed" type="range" min="1" max="10" value="5"></label>
+        </div>
+        <div id="tape" class="tape" aria-live="polite"></div>
+        <div id="verdict" class="verdict"></div>
+        <ol id="trace" class="trace"></ol>
+      </section>
+    </div>
+
+    <aside class="col-side">
+      <section class="card">
+        <h2>Language</h2>
+        <div id="lang" class="lang"></div>
+        <p id="langEn" class="muted"></p>
+        <ul id="notes" class="notes"></ul>
+      </section>
+      <section class="card">
+        <h2>Formal definition</h2>
+        <div id="tuple" class="tuple mono"></div>
+        <div class="table-wrap"><table id="ttable" class="dtable"></table></div>
+      </section>
+      <section class="card">
+        <h2>Example strings</h2>
+        <div class="samples"><b class="okc">Accepted</b><div id="sAcc" class="pills"></div></div>
+        <div class="samples"><b class="badc">Rejected</b><div id="sRej" class="pills"></div></div>
+      </section>
+      <section class="card">
+        <h2>Test many strings</h2>
+        <textarea id="batch" rows="3" class="mono" spellcheck="false" placeholder="one per line, or comma-separated&#10;use ε for empty"></textarea>
+        <div id="batchOut" class="pills"></div>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<footer>Runs entirely in your browser — no server, no build step.</footer>
+
+<script src="js/dfa.js"></script>
+<script src="js/render.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
